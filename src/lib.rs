@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 extern crate alloc;
 use alloc::vec::Vec;
 use core::ops::{AddAssign, SubAssign};
@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct FenwickTree<T> {
+pub struct BITree<T> {
     inner: Vec<T>,
 }
 
-impl<T> FromIterator<T> for FenwickTree<T>
+impl<T> FromIterator<T> for BITree<T>
 where
     T: Copy + AddAssign,
 {
@@ -44,17 +44,17 @@ where
             }
         }
 
-        FenwickTree { inner }
+        BITree { inner }
     }
 }
 
-impl<const N: usize> From<[usize; N]> for FenwickTree<usize> {
+impl<const N: usize> From<[usize; N]> for BITree<usize> {
     fn from(value: [usize; N]) -> Self {
-        return FenwickTree::from_iter(value.into_iter());
+        return BITree::from_iter(value.into_iter());
     }
 }
 
-impl<T> FenwickTree<T> {
+impl<T> BITree<T> {
     /// Creates an empty fenwick tree.
     ///
     pub const fn new() -> Self {
@@ -72,7 +72,7 @@ impl<T> FenwickTree<T> {
     }
 }
 
-impl<T> FenwickTree<T> {
+impl<T> BITree<T> {
     /// Computes the prefix sum up until the desired index.
     ///
     /// The prefix sum up until the zeroth element is 0, since there is nothing before it.
@@ -360,7 +360,7 @@ const fn most_significant_bit(n: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::FenwickTree;
+    use super::BITree;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -368,14 +368,14 @@ mod tests {
     fn test_new() {
         let lengths: [usize; 5] = [1, 6, 3, 9, 2];
         let expected_index: Vec<usize> = vec![1, 7, 3, 19, 2];
-        let actual_index = FenwickTree::from_iter(lengths);
+        let actual_index = BITree::from_iter(lengths);
         assert_eq!(expected_index, actual_index.inner)
     }
 
     #[test]
     fn test_prefix_sum() {
         let lengths = [1, 6, 3, 9, 2];
-        let fenwick_array = FenwickTree::from_iter(lengths);
+        let fenwick_array = BITree::from_iter(lengths);
 
         let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
         // The prefix sum up until the zeroth element is 0, since there is nothing before it
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn test_update_index() {
         let lengths = [1, 6, 3, 9, 2];
-        let mut fenwick_array = FenwickTree::from_iter(lengths);
+        let mut fenwick_array = BITree::from_iter(lengths);
 
         let cases: Vec<(usize, usize)> = vec![(0, 2), (1, 8), (2, 3), (3, 20), (4, 2)];
 
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn test_index_of() {
         let lengths = [1, 6, 3, 9, 2];
-        let fenwick_array = FenwickTree::from_iter(lengths);
+        let fenwick_array = BITree::from_iter(lengths);
 
         let cases: Vec<(usize, usize)> = vec![(0, 0), (6, 1), (9, 2), (18, 3), (20, 4)];
 
@@ -416,14 +416,14 @@ mod tests {
     #[ntest::timeout(1000)]
     fn test_zero_array() {
         // test for a regression where index_of in an array containing only 0 would loop endlessly
-        let f0: FenwickTree<usize> = FenwickTree::from([0]);
+        let f0: BITree<usize> = BITree::from([0]);
         assert_eq!(f0.prefix_sum(0, 0), 0);
         assert_eq!(f0.index_of(1), 1);
     }
 
     #[test]
     fn test_push_empty() {
-        let mut fenwick = FenwickTree::new();
+        let mut fenwick = BITree::new();
         fenwick.push(5);
         assert_eq!(fenwick.inner, vec![5]);
         assert_eq!(fenwick.prefix_sum(1, 0), 5);
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_push_sequence() {
-        let mut fenwick = FenwickTree::new();
+        let mut fenwick = BITree::new();
         let values = [1, 6, 3, 9, 2];
         let expected_sums = vec![(1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
 
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_push_after_initialization() {
-        let mut fenwick = FenwickTree::from_iter([1, 6, 3].into_iter());
+        let mut fenwick = BITree::from_iter([1, 6, 3].into_iter());
         fenwick.push(9);
         fenwick.push(2);
 
@@ -458,20 +458,20 @@ mod tests {
 
     #[test]
     fn test_pop_empty() {
-        let mut fenwick: FenwickTree<usize> = FenwickTree::new();
+        let mut fenwick: BITree<usize> = BITree::new();
         assert_eq!(fenwick.pop(), false);
     }
 
     #[test]
     fn test_pop_single() {
-        let mut fenwick = FenwickTree::from_iter([5].into_iter());
+        let mut fenwick = BITree::from_iter([5].into_iter());
         assert_eq!(fenwick.pop(), true);
         assert!(fenwick.is_empty());
     }
 
     #[test]
     fn test_pop_sequence() {
-        let mut fenwick = FenwickTree::from_iter([1, 6, 3, 9, 2].into_iter());
+        let mut fenwick = BITree::from_iter([1, 6, 3, 9, 2].into_iter());
         assert_eq!(fenwick.pop(), true);
         assert_eq!(fenwick.pop(), true);
         assert_eq!(fenwick.pop(), true);
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_push_pop_alternating() {
-        let mut fenwick = FenwickTree::new();
+        let mut fenwick = BITree::new();
 
         fenwick.push(1);
         fenwick.push(6);
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_zero_handling() {
-        let mut fenwick = FenwickTree::new();
+        let mut fenwick = BITree::new();
         fenwick.push(0);
         fenwick.push(0);
         assert_eq!(fenwick.pop(), true);
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_negative_values() {
-        let mut fenwick: FenwickTree<i32> = FenwickTree::new();
+        let mut fenwick: BITree<i32> = BITree::new();
         fenwick.push(-1);
         fenwick.push(2);
         fenwick.push(-3);
