@@ -1,5 +1,7 @@
 #![no_std]
+
 extern crate alloc;
+
 use alloc::vec::Vec;
 use core::ops::{AddAssign, SubAssign};
 
@@ -12,50 +14,70 @@ pub struct BITree<T> {
     inner: Vec<T>,
 }
 
-impl<T> FromIterator<T> for BITree<T>
-where
-    T: Copy + AddAssign,
-{
-    /// Creates a new fenwick tree.
+impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
+    /// Creates a new binary indexed tree.
     ///
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
     /// let lengths: [usize; 5] = [1, 6, 3, 9, 2];
-    /// // This is how lengths fenwick tree will look like internally
-    /// let fenwick_tree: Vec<usize> = vec![1, 7, 3, 19, 2];
+    /// // This is how lengths binary indexed tree will look like internally
+    /// let _internal: Vec<usize> = vec![1, 7, 3, 19, 2];
     /// // And this is how it can be constructed
-    /// let initialized_fenwick_tree = FenwickTree::from_iter(lengths);
+    /// let bitree = BITree::from_iter(lengths);
     /// ```
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-    {
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut inner: Vec<T> = iter.into_iter().collect();
         let n = inner.len();
-
-        for i in 0..n {
-            let parent = i | (i + 1);
-            if parent < n {
-                let child = inner[i];
-                inner[parent] += child;
-            }
-        }
-
+        rebuild(&mut inner, 0..n, |p, c| *p += c);
         BITree { inner }
     }
 }
 
-impl<const N: usize> From<[usize; N]> for BITree<usize> {
-    fn from(value: [usize; N]) -> Self {
-        return BITree::from_iter(value.into_iter());
+impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+
+    /// Consumes the tree and yields the original values in order.
+    ///
+    /// The returned iterator is `DoubleEndedIterator + ExactSizeIterator`, so it
+    /// supports both forward and reverse traversal in O(1) per element after an
+    /// O(n) setup that undoes the Fenwick build.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let lengths = [1, 6, 3, 9, 2];
+    /// let bitree = BITree::from_iter(lengths);
+    ///
+    /// let collected: Vec<_> = bitree.into_iter().collect();
+    /// assert_eq!(collected, vec![1, 6, 3, 9, 2]);
+    /// ```
+    ///
+    /// Reverse iteration works too:
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// let reversed: Vec<_> = bitree.into_iter().rev().collect();
+    /// assert_eq!(reversed, vec![2, 9, 3, 6, 1]);
+    /// ```
+    #[inline]
+    fn into_iter(mut self) -> Self::IntoIter {
+        let n = self.inner.len();
+        rebuild(&mut self.inner, (0..n).rev(), |p, c| *p -= c);
+        self.inner.into_iter()
     }
 }
 
 impl<T> BITree<T> {
-    /// Creates an empty fenwick tree.
+    /// Creates an empty binary indexed tree.
     ///
     pub const fn new() -> Self {
         let inner = Vec::new();
@@ -70,12 +92,38 @@ impl<T> BITree<T> {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
+    #[inline(always)]
+    fn walk_prefix<F>(&self, index: usize, sum: &mut T, mut op: F)
+    where
+        F: FnMut(&mut T, &T),
+    {
+        assert!(index < self.inner.len() + 1);
+
+        let mut current_idx = index;
+        while current_idx > 0 {
+            op(sum, &self.inner[current_idx - 1]);
+            current_idx &= current_idx - 1;
+        }
+    }
+
+    #[inline(always)]
+    fn walk_update<F>(&mut self, index: usize, diff: T, mut op: F)
+    where
+        F: FnMut(&mut T, &T),
+    {
+        let mut current_idx = index;
+        while let Some(value) = self.inner.get_mut(current_idx) {
+            op(value, &diff);
+            current_idx |= current_idx + 1;
+        }
+    }
 }
 
 impl<T> BITree<T> {
-    /// Computes the prefix sum up until the desired index.
+    /// Adds the prefix sum up until the desired index into `sum`.
     ///
-    /// The prefix sum up until the zeroth element is 0, since there is nothing before it.
+    /// The prefix sum up until the zeroth element is 0, so `sum` is left unchanged.
     ///
     /// The prefix sum up until an index larger than the length is undefined, since every
     /// element after the length - 1 is undefined, therefore it will panic.
@@ -83,90 +131,127 @@ impl<T> BITree<T> {
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    ///
+    /// let mut running = 100;
+    /// bitree.add_prefix_sum(3, &mut running);
+    /// assert_eq!(running, 110);
+    /// ```
+    #[inline]
+    pub fn add_prefix_sum(&self, index: usize, sum: &mut T)
+    where
+        T: for<'a> AddAssign<&'a T>,
+    {
+        self.walk_prefix(index, sum, |s, v| *s += v);
+    }
+    /// Computes the prefix sum up until the desired index, starting from `T::default()`.
+    ///
+    /// See [`Self::add_prefix_sum`] for the variant that accumulates into an existing value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
     ///
     /// let lengths = [1, 6, 3, 9, 2];
-    /// let fenwick_array = FenwickTree::from_iter(lengths);
+    /// let bitree = BITree::from_iter(lengths);
     ///
     /// let cases: Vec<(usize, usize)> =
     ///  vec![(0, 0), (1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
     ///
     /// cases
     ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(fenwick_array.prefix_sum(idx, 0), expected_sum))
+    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     /// ```
-    pub fn prefix_sum(&self, index: usize, mut sum: T) -> T
+    #[inline]
+    pub fn prefix_sum(&self, index: usize) -> T
     where
-        T: Copy + AddAssign,
+        T: for<'a> AddAssign<&'a T> + Default,
     {
-        assert!(index < self.inner.len() + 1);
-
-        let mut current_idx = index;
-
-        while current_idx > 0 {
-            sum += self.inner[current_idx - 1];
-            current_idx &= current_idx - 1
-        }
-
+        let mut sum = T::default();
+        self.add_prefix_sum(index, &mut sum);
         sum
+    }
+    /// Subtracts the prefix sum up until the desired index from `sum`.
+    ///
+    /// The prefix sum up until the zeroth element is 0, so `sum` is left unchanged.
+    ///
+    /// The prefix sum up until an index larger than the length is undefined, since every
+    /// element after the length - 1 is undefined, therefore it will panic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    ///
+    /// let mut running = 100;
+    /// bitree.sub_prefix_sum(3, &mut running);
+    /// assert_eq!(running, 90);
+    /// ```
+    #[inline]
+    pub fn sub_prefix_sum(&self, index: usize, sum: &mut T)
+    where
+        T: for<'a> SubAssign<&'a T>,
+    {
+        self.walk_prefix(index, sum, |s, v| *s -= v);
     }
     /// Increments a given index with a difference.
     ///
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
     /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut fenwick_array = FenwickTree::from_iter(lengths);
+    /// let mut bitree = BITree::from_iter(lengths);
     ///
     /// let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 2), (2, 8), (3, 11), (4, 20), (5, 22)];
     ///
-    /// fenwick_array.add_at(0, 1);
+    /// bitree.add_at(0, 1);
     ///
     /// cases
     ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(fenwick_array.prefix_sum(idx, 0), expected_sum))
+    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     /// ```
+    #[inline]
     pub fn add_at(&mut self, index: usize, diff: T)
     where
-        T: Copy + AddAssign,
+        T: for<'a> AddAssign<&'a T>,
     {
-        let mut current_idx = index;
-
-        while let Some(value) = self.inner.get_mut(current_idx) {
-            *value += diff;
-            current_idx |= current_idx + 1;
-        }
+        self.walk_update(index, diff, |v, d| *v += d);
     }
     /// Appends a new value to the end of the Fenwick tree.
     ///
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
-    /// let mut fenwick_array = FenwickTree::from_iter([1, 6, 3].into_iter());
-    /// fenwick_array.push(9);
+    /// let mut bitree = BITree::from_iter([1, 6, 3].into_iter());
+    /// bitree.push(9);
     ///
     /// // Check prefix sums after pushing
-    /// assert_eq!(fenwick_array.prefix_sum(1, 0), 1);  // sum of [1]
-    /// assert_eq!(fenwick_array.prefix_sum(2, 0), 7);  // sum of [1, 6]
-    /// assert_eq!(fenwick_array.prefix_sum(3, 0), 10); // sum of [1, 6, 3]
-    /// assert_eq!(fenwick_array.prefix_sum(4, 0), 19); // sum of [1, 6, 3, 9]
+    /// assert_eq!(bitree.prefix_sum(1), 1);  // sum of [1]
+    /// assert_eq!(bitree.prefix_sum(2), 7);  // sum of [1, 6]
+    /// assert_eq!(bitree.prefix_sum(3), 10); // sum of [1, 6, 3]
+    /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
     /// ```
     pub fn push(&mut self, value: T)
     where
-        T: Copy + AddAssign + Default,
+        T: for<'a> AddAssign<&'a T>,
     {
         let index = self.inner.len();
         self.inner.push(value);
 
         let lower_one_bits = (!index).trailing_zeros();
+        let (left, right) = self.inner.split_at_mut(index);
         for i in 0..lower_one_bits {
             let child = index & !(1 << i);
-            let child_val = self.inner[child];
-            self.inner[index] += child_val;
+            right[0] += &left[child];
         }
     }
     /// Subtracts a difference from a given index.
@@ -174,29 +259,25 @@ impl<T> BITree<T> {
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
     /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut fenwick_array = FenwickTree::from_iter(lengths);
+    /// let mut bitree = BITree::from_iter(lengths);
     ///
     /// let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 0), (2, 6), (3, 9), (4, 18), (5, 20)];
     ///
-    /// fenwick_array.sub_at(0, 1);
+    /// bitree.sub_at(0, 1);
     ///
     /// cases
     ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(fenwick_array.prefix_sum(idx, 0), expected_sum))
+    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     /// ```
+    #[inline]
     pub fn sub_at(&mut self, index: usize, diff: T)
     where
-        T: Copy + SubAssign,
+        T: for<'a> SubAssign<&'a T>,
     {
-        let mut current_idx = index;
-
-        while let Some(value) = self.inner.get_mut(current_idx) {
-            *value -= diff;
-            current_idx |= current_idx + 1;
-        }
+        self.walk_update(index, diff, |v, d| *v -= d);
     }
     /// Removes the last element from the Fenwick tree.
     ///
@@ -205,151 +286,110 @@ impl<T> BITree<T> {
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
-    /// let mut fenwick_array = FenwickTree::from_iter([1, 6, 3, 9].into_iter());
+    /// let mut bitree = BITree::from_iter([1, 6, 3, 9].into_iter());
     ///
-    /// assert_eq!(fenwick_array.pop(), true);  
-    /// assert_eq!(fenwick_array.prefix_sum(3, 0), 10);  // sum of remaining [1, 6, 3]
+    /// assert_eq!(bitree.pop(), true);  
+    /// assert_eq!(bitree.prefix_sum(3), 10);  // sum of remaining [1, 6, 3]
     ///
     /// // Can continue popping
-    /// assert_eq!(fenwick_array.pop(), true);
-    /// assert_eq!(fenwick_array.prefix_sum(2, 0), 7);   // sum of remaining [1, 6]
+    /// assert_eq!(bitree.pop(), true);
+    /// assert_eq!(bitree.prefix_sum(2), 7);   // sum of remaining [1, 6]
     ///
     /// // Returns false when empty
-    /// fenwick_array.pop();  // removes 6
-    /// fenwick_array.pop();  // removes 1
-    /// assert_eq!(fenwick_array.pop(), false);
+    /// bitree.pop();  // removes 6
+    /// bitree.pop();  // removes 1
+    /// assert_eq!(bitree.pop(), false);
     /// ```
-    pub fn pop(&mut self) -> bool
-    where
-        T: Copy + SubAssign + AddAssign + Default,
-    {
-        if self.is_empty() {
-            return false;
-        }
-
-        let last_idx = self.inner.len() - 1;
-
-        let sum_excl = self.prefix_sum(last_idx, T::default());
-        let sum_incl = self.prefix_sum(last_idx + 1, T::default());
-        let mut reconstructed_value = sum_incl;
-        reconstructed_value -= sum_excl;
-
-        self.sub_at(last_idx, reconstructed_value);
-
+    pub fn pop(&mut self) -> bool {
         self.inner.pop().is_some()
     }
-    /// Given a sum, finds the slot in which it would be "contained" within the original
-    /// array.
+    /// Given a sum, walks the tree to find the slot containing it, subtracting the
+    /// consumed segment sums from `prefix_sum` along the way.
+    ///
+    /// After the call, `*prefix_sum` holds the remainder — the portion of the original
+    /// sum that falls strictly past the start of the returned slot.
     ///
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut fenwick_array = FenwickTree::from_iter(lengths);
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
     ///
-    /// let cases: Vec<(usize, usize)> = vec![(0, 0), (6, 1), (9, 2), (18, 3), (20, 4)];
-    ///
-    /// cases
-    ///   .into_iter()
-    ///   .for_each(|(prefix_sum, idx)| assert_eq!(fenwick_array.index_of(prefix_sum), idx))
+    /// let mut remaining = 9;
+    /// let idx = bitree.sub_index_of(&mut remaining);
+    /// assert_eq!((idx, remaining), (2, 2));
     /// ```
-    pub fn index_of(&self, mut prefix_sum: T) -> usize
+    pub fn sub_index_of(&self, prefix_sum: &mut T) -> usize
     where
-        T: Copy + Ord + SubAssign,
+        T: PartialOrd + for<'a> SubAssign<&'a T>,
     {
-        let mut index = 0;
-        let mut probe = most_significant_bit(self.inner.len()) * 2;
+        let n = self.inner.len();
+        let mut pos = 0;
+        let mut mask = most_significant_bit(n);
 
-        while probe > 0 {
-            let lsb = least_significant_bit(probe);
-            let half_lsb = lsb / 2;
-            let other_half_lsb = lsb - half_lsb;
-
-            if let Some(value) = self.inner.get(probe - 1) {
-                if *value < prefix_sum {
-                    index = probe;
-                    prefix_sum -= *value;
-
-                    probe += half_lsb;
-
-                    if half_lsb > 0 {
-                        continue;
-                    }
+        while mask > 0 {
+            let next = pos + mask;
+            if next <= n {
+                let value = &self.inner[next - 1];
+                if *value < *prefix_sum {
+                    pos = next;
+                    *prefix_sum -= value;
                 }
             }
-
-            if lsb % 2 > 0 {
-                break;
-            }
-
-            probe -= other_half_lsb;
+            mask >>= 1;
         }
 
-        index
+        pos
     }
     /// Given a sum, finds the slot in which it would be "contained" within the original
-    /// array. This method also returns the remainder.
+    /// array, along with the remainder — the portion of the sum that falls strictly past
+    /// the start of the returned slot.
     ///
-    /// If the remainder is not needed, use [`Self::index_of()`] instead
+    /// If the remainder is not needed, destructure with `let (idx, _) = ...`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use ftree::FenwickTree;
+    /// use bitree::BITree;
     ///
     /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut fenwick_array = FenwickTree::from_iter(lengths);
+    /// let bitree = BITree::from_iter(lengths);
     ///
     /// let cases: Vec<(usize, (usize, usize))> = vec![(0, (0, 0)), (6, (1, 5)), (9, (2, 2)), (18, (3, 8)), (20, (4, 1))];
     ///
     /// cases
     ///   .into_iter()
-    ///   .for_each(|(prefix_sum, idx)| assert_eq!(fenwick_array.index_of_with_remainder(prefix_sum), idx))
+    ///   .for_each(|(prefix_sum, idx)| assert_eq!(bitree.index_of(prefix_sum), idx))
     /// ```
-    pub fn index_of_with_remainder(&self, mut prefix_sum: T) -> (usize, T)
+    #[inline(always)]
+    pub fn index_of(&self, mut prefix_sum: T) -> (usize, T)
     where
-        T: Copy + Ord + SubAssign,
+        T: PartialOrd + for<'a> SubAssign<&'a T>,
     {
-        let mut index = 0;
-        let mut probe = most_significant_bit(self.inner.len()) * 2;
-
-        while probe > 0 {
-            let lsb = least_significant_bit(probe);
-            let half_lsb = lsb / 2;
-            let other_half_lsb = lsb - half_lsb;
-
-            if let Some(value) = self.inner.get(probe - 1) {
-                if *value < prefix_sum {
-                    index = probe;
-                    prefix_sum -= *value;
-
-                    probe += half_lsb;
-
-                    if half_lsb > 0 {
-                        continue;
-                    }
-                }
-            }
-
-            if lsb % 2 > 0 {
-                break;
-            }
-
-            probe -= other_half_lsb;
-        }
-
+        let index = self.sub_index_of(&mut prefix_sum);
         (index, prefix_sum)
     }
 }
 
-const fn least_significant_bit(n: usize) -> usize {
-    n & n.wrapping_neg()
+#[inline(always)]
+fn rebuild<T, I, F>(inner: &mut [T], indices: I, mut op: F)
+where
+    I: IntoIterator<Item = usize>,
+    F: FnMut(&mut T, &T),
+{
+    for i in indices {
+        let parent = i | (i + 1);
+        if let Some((left, [parent_ref, ..])) = inner.split_at_mut_checked(parent) {
+            let child_ref = &left[i];
+            op(parent_ref, child_ref);
+        }
+    }
 }
 
+#[inline(always)]
 const fn most_significant_bit(n: usize) -> usize {
     if n == 0 {
         0
@@ -360,6 +400,7 @@ const fn most_significant_bit(n: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::BITree;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -375,50 +416,132 @@ mod tests {
     #[test]
     fn test_prefix_sum() {
         let lengths = [1, 6, 3, 9, 2];
-        let fenwick_array = BITree::from_iter(lengths);
+        let bitree = BITree::from_iter(lengths);
 
         let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
         // The prefix sum up until the zeroth element is 0, since there is nothing before it
         // The prefix sum up until an index larger than the length is undefined, since every
         // element after the length - 1 is undefined
-        cases.into_iter().for_each(|(idx, expected_sum)| {
-            assert_eq!(fenwick_array.prefix_sum(idx, 0), expected_sum)
-        })
+        cases
+            .into_iter()
+            .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     }
 
     #[test]
     fn test_update_index() {
         let lengths = [1, 6, 3, 9, 2];
-        let mut fenwick_array = BITree::from_iter(lengths);
+        let mut bitree = BITree::from_iter(lengths);
 
         let cases: Vec<(usize, usize)> = vec![(0, 2), (1, 8), (2, 3), (3, 20), (4, 2)];
 
-        fenwick_array.add_at(0, 1);
+        bitree.add_at(0, 1);
 
         cases
             .into_iter()
-            .for_each(|(idx, expected_value)| assert_eq!(fenwick_array.inner[idx], expected_value))
+            .for_each(|(idx, expected_value)| assert_eq!(bitree.inner[idx], expected_value))
     }
 
     #[test]
     fn test_index_of() {
         let lengths = [1, 6, 3, 9, 2];
-        let fenwick_array = BITree::from_iter(lengths);
+        let bitree = BITree::from_iter(lengths);
 
-        let cases: Vec<(usize, usize)> = vec![(0, 0), (6, 1), (9, 2), (18, 3), (20, 4)];
+        let cases: Vec<(usize, (usize, usize))> = vec![
+            (0, (0, 0)),
+            (6, (1, 5)),
+            (9, (2, 2)),
+            (18, (3, 8)),
+            (20, (4, 1)),
+        ];
 
         cases
             .into_iter()
-            .for_each(|(prefix_sum, idx)| assert_eq!(fenwick_array.index_of(prefix_sum), idx))
+            .for_each(|(prefix_sum, expected)| assert_eq!(bitree.index_of(prefix_sum), expected))
     }
 
     #[test]
     #[ntest::timeout(1000)]
     fn test_zero_array() {
         // test for a regression where index_of in an array containing only 0 would loop endlessly
-        let f0: BITree<usize> = BITree::from([0]);
-        assert_eq!(f0.prefix_sum(0, 0), 0);
-        assert_eq!(f0.index_of(1), 1);
+        let f0: BITree<usize> = BITree::from_iter([0]);
+        assert_eq!(f0.prefix_sum(0), 0);
+        assert_eq!(f0.index_of(1), (1, 1));
+    }
+
+    #[test]
+    fn test_sub_index_of_empty() {
+        let bitree: BITree<usize> = BITree::new();
+        let mut remaining = 5;
+        assert_eq!(bitree.sub_index_of(&mut remaining), 0);
+        assert_eq!(remaining, 5);
+    }
+
+    #[test]
+    fn test_sub_index_of_single() {
+        let bitree = BITree::from_iter([7usize]);
+        // prefix sums: 0, 7
+        let cases: Vec<(usize, (usize, usize))> =
+            vec![(0, (0, 0)), (1, (0, 1)), (7, (0, 7)), (8, (1, 1))];
+        cases.into_iter().for_each(|(target, expected)| {
+            let mut remaining = target;
+            let idx = bitree.sub_index_of(&mut remaining);
+            assert_eq!((idx, remaining), expected, "target={}", target);
+        });
+    }
+
+    #[test]
+    fn test_sub_index_of_power_of_two_len() {
+        // length 4 exercises a tree whose root mask equals n
+        let bitree = BITree::from_iter([2usize, 3, 5, 7]);
+        // prefix sums: 0, 2, 5, 10, 17
+        let cases: Vec<(usize, (usize, usize))> = vec![
+            (0, (0, 0)),
+            (2, (0, 2)),   // boundary: prefix_sum(1)=2 not strictly < 2
+            (3, (1, 1)),
+            (5, (1, 3)),   // boundary
+            (6, (2, 1)),
+            (10, (2, 5)),  // boundary
+            (11, (3, 1)),
+            (17, (3, 7)),  // boundary: total sum
+            (18, (4, 1)),  // exceeds total
+        ];
+        cases.into_iter().for_each(|(target, expected)| {
+            let mut remaining = target;
+            let idx = bitree.sub_index_of(&mut remaining);
+            assert_eq!((idx, remaining), expected, "target={}", target);
+        });
+    }
+
+    #[test]
+    fn test_sub_index_of_uniform_seven() {
+        // length 7 (odd, non-power-of-two) with uniform values makes expected
+        // results easy to reason about: prefix_sum(k) = k.
+        let bitree = BITree::from_iter([1usize; 7]);
+        let cases: Vec<(usize, (usize, usize))> = vec![
+            (0, (0, 0)),
+            (1, (0, 1)),
+            (2, (1, 1)),
+            (3, (2, 1)),
+            (4, (3, 1)),
+            (5, (4, 1)),
+            (6, (5, 1)),
+            (7, (6, 1)),
+            (8, (7, 1)), // exceeds total
+        ];
+        cases.into_iter().for_each(|(target, expected)| {
+            let mut remaining = target;
+            let idx = bitree.sub_index_of(&mut remaining);
+            assert_eq!((idx, remaining), expected, "target={}", target);
+        });
+    }
+
+    #[test]
+    fn test_sub_index_of_exceeds_total() {
+        let bitree = BITree::from_iter([1usize, 6, 3, 9, 2]);
+        // total sum = 21, n = 5
+        let mut remaining = 100;
+        assert_eq!(bitree.sub_index_of(&mut remaining), 5);
+        assert_eq!(remaining, 100 - 21);
     }
 
     #[test]
@@ -426,7 +549,7 @@ mod tests {
         let mut fenwick = BITree::new();
         fenwick.push(5);
         assert_eq!(fenwick.inner, vec![5]);
-        assert_eq!(fenwick.prefix_sum(1, 0), 5);
+        assert_eq!(fenwick.prefix_sum(1), 5);
     }
 
     #[test]
@@ -441,7 +564,7 @@ mod tests {
 
         expected_sums
             .into_iter()
-            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx, 0), expected_sum));
+            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx), expected_sum));
     }
 
     #[test]
@@ -453,7 +576,7 @@ mod tests {
         let expected_sums = vec![(1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
         expected_sums
             .into_iter()
-            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx, 0), expected_sum));
+            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx), expected_sum));
     }
 
     #[test]
@@ -476,8 +599,8 @@ mod tests {
         assert_eq!(fenwick.pop(), true);
         assert_eq!(fenwick.pop(), true);
 
-        assert_eq!(fenwick.prefix_sum(1, 0), 1);
-        assert_eq!(fenwick.prefix_sum(2, 0), 7);
+        assert_eq!(fenwick.prefix_sum(1), 1);
+        assert_eq!(fenwick.prefix_sum(2), 7);
     }
 
     #[test]
@@ -493,8 +616,8 @@ mod tests {
         fenwick.push(2);
         assert_eq!(fenwick.pop(), true);
 
-        assert_eq!(fenwick.prefix_sum(1, 0), 1);
-        assert_eq!(fenwick.prefix_sum(2, 0), 10);
+        assert_eq!(fenwick.prefix_sum(1), 1);
+        assert_eq!(fenwick.prefix_sum(2), 10);
     }
 
     #[test]
@@ -503,7 +626,7 @@ mod tests {
         fenwick.push(0);
         fenwick.push(0);
         assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.prefix_sum(1, 0), 0);
+        assert_eq!(fenwick.prefix_sum(1), 0);
     }
 
     #[test]
@@ -514,6 +637,6 @@ mod tests {
         fenwick.push(-3);
 
         assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.prefix_sum(2, 0), 1);
+        assert_eq!(fenwick.prefix_sum(2), 1);
     }
 }
