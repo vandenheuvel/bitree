@@ -78,26 +78,69 @@ impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
 
 impl<T> BITree<T> {
     /// Creates an empty binary indexed tree.
-    ///
     pub const fn new() -> Self {
-        let inner = Vec::new();
-
-        Self { inner }
+        Self { inner: Vec::new() }
     }
 
-    pub fn is_empty(&self) -> bool {
+    /// Creates a new binary indexed tree containing `n` zero values.
+    ///
+    /// The initial capacity is `n`.
+    pub fn new_zeros(n: usize) -> Self where T: Default {
+        let mut inner = Vec::with_capacity(n);
+        for _ in 0..n {
+            inner.push(T::default());
+        }
+
+        Self {
+            inner,
+        }
+    }
+
+    /// Constructs a new, empty `BITree<T>` with at least the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Returns `true` if the tree contains no elements.
+    pub const fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Removes the last element from the Fenwick tree.
+    ///
+    /// Returns `false` if the tree is empty, and true otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let mut bitree = BITree::from_iter([1, 6, 3, 9].into_iter());
+    ///
+    /// assert_eq!(bitree.pop(), true);
+    /// assert_eq!(bitree.prefix_sum(3), 10);  // sum of remaining [1, 6, 3]
+    ///
+    /// // Can continue popping
+    /// assert_eq!(bitree.pop(), true);
+    /// assert_eq!(bitree.prefix_sum(2), 7);   // sum of remaining [1, 6]
+    ///
+    /// // Returns false when empty
+    /// bitree.pop();  // removes 6
+    /// bitree.pop();  // removes 1
+    /// assert_eq!(bitree.pop(), false);
+    /// ```
+    pub fn pop(&mut self) -> bool {
+        self.inner.pop().is_some()
+    }
+
     #[inline(always)]
-    fn walk_prefix<F>(&self, index: usize, sum: &mut T, mut op: F)
-    where
-        F: FnMut(&mut T, &T),
-    {
+    fn walk_prefix<F: FnMut(&mut T, &T)>(&self, index: usize, sum: &mut T, mut op: F) {
         assert!(index < self.inner.len() + 1);
 
         let mut current_idx = index;
@@ -108,10 +151,7 @@ impl<T> BITree<T> {
     }
 
     #[inline(always)]
-    fn walk_update<F>(&mut self, index: usize, diff: T, mut op: F)
-    where
-        F: FnMut(&mut T, &T),
-    {
+    fn walk_update<F: FnMut(&mut T, &T)>(&mut self, index: usize, diff: T, mut op: F) {
         assert!(index < self.len());
 
         let mut current_idx = index;
@@ -122,7 +162,7 @@ impl<T> BITree<T> {
     }
 }
 
-impl<T> BITree<T> {
+impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
     /// Adds the prefix sum up until the desired index into `sum`.
     ///
     /// The prefix sum up until the zeroth element is 0, so `sum` is left unchanged.
@@ -142,13 +182,11 @@ impl<T> BITree<T> {
     /// assert_eq!(running, 110);
     /// ```
     #[inline]
-    pub fn add_prefix_sum(&self, index: usize, sum: &mut T)
-    where
-        T: for<'a> AddAssign<&'a T>,
-    {
+    pub fn add_prefix_sum(&self, index: usize, sum: &mut T) {
         self.walk_prefix(index, sum, |s, v| *s += v);
     }
-    /// Computes the prefix sum up until the desired index, starting from `T::default()`.
+    /// Computes the prefix sum up until (excluding) the desired index, starting from
+    /// `T::default()`.
     ///
     /// See [`Self::add_prefix_sum`] for the variant that accumulates into an existing value.
     ///
@@ -170,7 +208,7 @@ impl<T> BITree<T> {
     #[inline]
     pub fn prefix_sum(&self, index: usize) -> T
     where
-        T: for<'a> AddAssign<&'a T> + Default,
+        T: Default,
     {
         let mut sum = T::default();
         self.add_prefix_sum(index, &mut sum);
@@ -195,10 +233,7 @@ impl<T> BITree<T> {
     /// assert_eq!(running, 90);
     /// ```
     #[inline]
-    pub fn sub_prefix_sum(&self, index: usize, sum: &mut T)
-    where
-        T: for<'a> SubAssign<&'a T>,
-    {
+    pub fn sub_prefix_sum(&self, index: usize, sum: &mut T) {
         self.walk_prefix(index, sum, |s, v| *s -= v);
     }
     /// Increments a given index with a difference.
@@ -220,10 +255,7 @@ impl<T> BITree<T> {
     ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     /// ```
     #[inline]
-    pub fn add_at(&mut self, index: usize, diff: T)
-    where
-        T: for<'a> AddAssign<&'a T>,
-    {
+    pub fn add_at(&mut self, index: usize, diff: T) {
         self.walk_update(index, diff, |v, d| *v += d);
     }
     /// Appends a new value to the end of the Fenwick tree.
@@ -242,10 +274,7 @@ impl<T> BITree<T> {
     /// assert_eq!(bitree.prefix_sum(3), 10); // sum of [1, 6, 3]
     /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
     /// ```
-    pub fn push(&mut self, mut value: T)
-    where
-        T: for<'a> AddAssign<&'a T>,
-    {
+    pub fn push(&mut self, mut value: T) {
         let index = self.inner.len();
         for i in 0..index.trailing_ones() {
             let child = index & !(1 << i);
@@ -272,38 +301,12 @@ impl<T> BITree<T> {
     ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
     /// ```
     #[inline]
-    pub fn sub_at(&mut self, index: usize, diff: T)
-    where
-        T: for<'a> SubAssign<&'a T>,
-    {
+    pub fn sub_at(&mut self, index: usize, diff: T) {
         self.walk_update(index, diff, |v, d| *v -= d);
     }
-    /// Removes the last element from the Fenwick tree.
-    ///
-    /// Returns `false` if the tree is empty, and true otherwise.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let mut bitree = BITree::from_iter([1, 6, 3, 9].into_iter());
-    ///
-    /// assert_eq!(bitree.pop(), true);  
-    /// assert_eq!(bitree.prefix_sum(3), 10);  // sum of remaining [1, 6, 3]
-    ///
-    /// // Can continue popping
-    /// assert_eq!(bitree.pop(), true);
-    /// assert_eq!(bitree.prefix_sum(2), 7);   // sum of remaining [1, 6]
-    ///
-    /// // Returns false when empty
-    /// bitree.pop();  // removes 6
-    /// bitree.pop();  // removes 1
-    /// assert_eq!(bitree.pop(), false);
-    /// ```
-    pub fn pop(&mut self) -> bool {
-        self.inner.pop().is_some()
-    }
+}
+
+impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree<T> {
     /// Given a sum, walks the tree to find the slot containing it, subtracting the
     /// consumed segment sums from `prefix_sum` along the way.
     ///
@@ -321,10 +324,7 @@ impl<T> BITree<T> {
     /// let idx = bitree.sub_index_of(&mut remaining);
     /// assert_eq!((idx, remaining), (2, 2));
     /// ```
-    pub fn sub_index_of(&self, prefix_sum: &mut T) -> usize
-    where
-        T: PartialOrd + for<'a> SubAssign<&'a T>,
-    {
+    pub fn sub_index_of(&self, prefix_sum: &mut T) -> usize {
         let n = self.inner.len();
         let mut pos = 0;
         let mut mask = most_significant_bit(n);
@@ -364,10 +364,7 @@ impl<T> BITree<T> {
     ///   .for_each(|(prefix_sum, idx)| assert_eq!(bitree.index_of(prefix_sum), idx))
     /// ```
     #[inline(always)]
-    pub fn index_of(&self, mut prefix_sum: T) -> (usize, T)
-    where
-        T: PartialOrd + for<'a> SubAssign<&'a T>,
-    {
+    pub fn index_of(&self, mut prefix_sum: T) -> (usize, T) {
         let index = self.sub_index_of(&mut prefix_sum);
         (index, prefix_sum)
     }
@@ -416,9 +413,17 @@ mod tests {
     #[test]
     fn test_new() {
         let lengths: [usize; 5] = [1, 6, 3, 9, 2];
-        let expected_index: Vec<usize> = vec![1, 7, 3, 19, 2];
+        let expected_index = vec![1, 7, 3, 19, 2];
         let actual_index = BITree::from_iter(lengths);
-        assert_eq!(expected_index, actual_index.inner)
+        assert_eq!(expected_index, actual_index.inner);
+
+        let n = 5;
+        let tree = BITree::<usize>::new_zeros(5);
+        assert_eq!(tree.len(), n);
+        assert!(!tree.is_empty());
+        assert_eq!(tree.prefix_sum(0), 0);
+        assert_eq!(tree.prefix_sum(3), 0);
+        assert_eq!(tree.prefix_sum(5), 0);
     }
 
     #[test]
@@ -504,14 +509,14 @@ mod tests {
         // prefix sums: 0, 2, 5, 10, 17
         let cases: Vec<(usize, (usize, usize))> = vec![
             (0, (0, 0)),
-            (2, (0, 2)),   // boundary: prefix_sum(1)=2 not strictly < 2
+            (2, (0, 2)), // boundary: prefix_sum(1)=2 not strictly < 2
             (3, (1, 1)),
-            (5, (1, 3)),   // boundary
+            (5, (1, 3)), // boundary
             (6, (2, 1)),
-            (10, (2, 5)),  // boundary
+            (10, (2, 5)), // boundary
             (11, (3, 1)),
-            (17, (3, 7)),  // boundary: total sum
-            (18, (4, 1)),  // exceeds total
+            (17, (3, 7)), // boundary: total sum
+            (18, (4, 1)), // exceeds total
         ];
         cases.into_iter().for_each(|(target, expected)| {
             let mut remaining = target;
