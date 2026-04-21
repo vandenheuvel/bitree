@@ -112,6 +112,8 @@ impl<T> BITree<T> {
     where
         F: FnMut(&mut T, &T),
     {
+        assert!(index < self.len());
+
         let mut current_idx = index;
         while let Some(value) = self.inner.get_mut(current_idx) {
             op(value, &diff);
@@ -555,97 +557,97 @@ mod tests {
 
     #[test]
     fn test_push_empty() {
-        let mut fenwick = BITree::new();
-        fenwick.push(5);
-        assert_eq!(fenwick.inner, vec![5]);
-        assert_eq!(fenwick.prefix_sum(1), 5);
+        let mut bitree = BITree::new();
+        bitree.push(5);
+        assert_eq!(bitree.inner, vec![5]);
+        assert_eq!(bitree.prefix_sum(1), 5);
     }
 
     #[test]
     fn test_push_sequence() {
-        let mut fenwick = BITree::new();
+        let mut bitree = BITree::new();
         let values = [1, 6, 3, 9, 2];
         let expected_sums = vec![(1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
 
         for &v in values.iter() {
-            fenwick.push(v);
+            bitree.push(v);
         }
 
         expected_sums
             .into_iter()
-            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx), expected_sum));
+            .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum));
     }
 
     #[test]
     fn test_push_after_initialization() {
-        let mut fenwick = BITree::from_iter([1, 6, 3].into_iter());
-        fenwick.push(9);
-        fenwick.push(2);
+        let mut bitree = BITree::from_iter([1, 6, 3].into_iter());
+        bitree.push(9);
+        bitree.push(2);
 
         let expected_sums = vec![(1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
         expected_sums
             .into_iter()
-            .for_each(|(idx, expected_sum)| assert_eq!(fenwick.prefix_sum(idx), expected_sum));
+            .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum));
     }
 
     #[test]
     fn test_pop_empty() {
-        let mut fenwick: BITree<usize> = BITree::new();
-        assert_eq!(fenwick.pop(), false);
+        let mut bitree: BITree<usize> = BITree::new();
+        assert_eq!(bitree.pop(), false);
     }
 
     #[test]
     fn test_pop_single() {
-        let mut fenwick = BITree::from_iter([5].into_iter());
-        assert_eq!(fenwick.pop(), true);
-        assert!(fenwick.is_empty());
+        let mut bitree = BITree::from_iter([5].into_iter());
+        assert_eq!(bitree.pop(), true);
+        assert!(bitree.is_empty());
     }
 
     #[test]
     fn test_pop_sequence() {
-        let mut fenwick = BITree::from_iter([1, 6, 3, 9, 2].into_iter());
-        assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.pop(), true);
+        let mut bitree = BITree::from_iter([1, 6, 3, 9, 2].into_iter());
+        assert_eq!(bitree.pop(), true);
+        assert_eq!(bitree.pop(), true);
+        assert_eq!(bitree.pop(), true);
 
-        assert_eq!(fenwick.prefix_sum(1), 1);
-        assert_eq!(fenwick.prefix_sum(2), 7);
+        assert_eq!(bitree.prefix_sum(1), 1);
+        assert_eq!(bitree.prefix_sum(2), 7);
     }
 
     #[test]
     fn test_push_pop_alternating() {
-        let mut fenwick = BITree::new();
+        let mut bitree = BITree::new();
 
-        fenwick.push(1);
-        fenwick.push(6);
-        assert_eq!(fenwick.pop(), true);
-        fenwick.push(3);
-        assert_eq!(fenwick.pop(), true);
-        fenwick.push(9);
-        fenwick.push(2);
-        assert_eq!(fenwick.pop(), true);
+        bitree.push(1);
+        bitree.push(6);
+        assert_eq!(bitree.pop(), true);
+        bitree.push(3);
+        assert_eq!(bitree.pop(), true);
+        bitree.push(9);
+        bitree.push(2);
+        assert_eq!(bitree.pop(), true);
 
-        assert_eq!(fenwick.prefix_sum(1), 1);
-        assert_eq!(fenwick.prefix_sum(2), 10);
+        assert_eq!(bitree.prefix_sum(1), 1);
+        assert_eq!(bitree.prefix_sum(2), 10);
     }
 
     #[test]
     fn test_zero_handling() {
-        let mut fenwick = BITree::new();
-        fenwick.push(0);
-        fenwick.push(0);
-        assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.prefix_sum(1), 0);
+        let mut bitree = BITree::new();
+        bitree.push(0);
+        bitree.push(0);
+        assert_eq!(bitree.pop(), true);
+        assert_eq!(bitree.prefix_sum(1), 0);
     }
 
     #[test]
     fn test_negative_values() {
-        let mut fenwick: BITree<i32> = BITree::new();
-        fenwick.push(-1);
-        fenwick.push(2);
-        fenwick.push(-3);
+        let mut bitree: BITree<i32> = BITree::new();
+        bitree.push(-1);
+        bitree.push(2);
+        bitree.push(-3);
 
-        assert_eq!(fenwick.pop(), true);
-        assert_eq!(fenwick.prefix_sum(2), 1);
+        assert_eq!(bitree.pop(), true);
+        assert_eq!(bitree.prefix_sum(2), 1);
     }
 }
