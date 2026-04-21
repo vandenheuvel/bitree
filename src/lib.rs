@@ -380,11 +380,20 @@ where
     I: IntoIterator<Item = usize>,
     F: FnMut(&mut T, &T),
 {
+    let n = inner.len();
+    let ptr = inner.as_mut_ptr();
     for i in indices {
         let parent = i | (i + 1);
-        if let Some((left, [parent_ref, ..])) = inner.split_at_mut_checked(parent) {
-            let child_ref = &left[i];
-            op(parent_ref, child_ref);
+        if parent < n {
+            // SAFETY:
+            //  - i < parent < n, so both offsets are in-bounds of `inner`.
+            //  - parent != i, so the &mut and & never alias.
+            //  - `ptr` is derived from a valid &mut [T] that outlives the loop.
+            unsafe {
+                let child = &*ptr.add(i);
+                let parent_ref = &mut *ptr.add(parent);
+                op(parent_ref, child);
+            }
         }
     }
 }
