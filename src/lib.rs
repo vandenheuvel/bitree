@@ -23,15 +23,16 @@ impl<T> BITree<T> {
     /// Creates a new binary indexed tree containing `n` zero values.
     ///
     /// The initial capacity is `n`.
-    pub fn new_zeros(n: usize) -> Self where T: Default {
+    pub fn new_zeros(n: usize) -> Self
+    where
+        T: Default,
+    {
         let mut inner = Vec::with_capacity(n);
         for _ in 0..n {
             inner.push(T::default());
         }
 
-        Self {
-            inner,
-        }
+        Self { inner }
     }
 
     /// Constructs a new, empty `BITree<T>` with at least the specified capacity.
@@ -73,6 +74,7 @@ impl<T> BITree<T> {
     /// bitree.pop();  // removes 1
     /// assert_eq!(bitree.pop(), false);
     /// ```
+    #[inline(always)]
     pub fn pop(&mut self) -> bool {
         self.inner.pop().is_some()
     }
@@ -298,6 +300,7 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
     /// assert_eq!(bitree.prefix_sum(3), 10); // sum of [1, 6, 3]
     /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
     /// ```
+    #[inline]
     pub fn push(&mut self, mut value: T) {
         let n = self.inner.len();
         for i in 0..n.trailing_ones() {
@@ -331,11 +334,13 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
 }
 
 impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree<T> {
-    /// Given a sum, walks the tree to find the slot containing it, subtracting the
-    /// consumed segment sums from `prefix_sum` along the way.
+    /// Walks the tree to find the largest `pos` such that `prefix_sum(pos) <= target`,
+    /// subtracting the consumed segment sums from `*remainder` along the way.
     ///
-    /// After the call, `*prefix_sum` holds the remainder — the portion of the original
-    /// sum that falls strictly past the start of the returned slot.
+    /// The caller supplies the initial target in `*remainder`. After the call,
+    /// `*remainder` holds `target - prefix_sum(pos)`. A `remainder` of `T::default()`
+    /// means `target` landed exactly on the boundary `prefix_sum(pos)`; anything else
+    /// falls strictly inside the slot starting at `pos`.
     ///
     /// # Examples
     ///
@@ -344,31 +349,29 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
     ///
     /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
     ///
+    /// // 9 lies between prefix_sum(2) = 7 and prefix_sum(3) = 10.
     /// let mut remaining = 9;
-    /// let idx = bitree.sub_index_of(&mut remaining);
+    /// let idx = bitree.sub_binary_search(&mut remaining);
     /// assert_eq!((idx, remaining), (2, 2));
+    ///
+    /// // Exact boundary: 7 == prefix_sum(2), so the walk advances past it.
+    /// let mut remaining = 7;
+    /// let idx = bitree.sub_binary_search(&mut remaining);
+    /// assert_eq!((idx, remaining), (2, 0));
     /// ```
-    pub fn sub_index_of(&self, prefix_sum: &mut T) -> usize {
+    pub fn sub_binary_search(&self, remainder: &mut T) -> usize {
         let n = self.inner.len();
         let mut pos = 0;
 
-        #[inline(always)]
-        const fn most_significant_bit(n: usize) -> usize {
-            if n == 0 {
-                0
-            } else {
-                1 << (usize::BITS - 1 - n.leading_zeros())
-            }
-        }
-        let mut mask = most_significant_bit(n);
+        let mut mask = n.checked_ilog2().map_or(0, |log| 1 << log);
 
         while mask > 0 {
             let next = pos + mask;
             if next <= n {
                 let value = &self.inner[next - 1];
-                if value < prefix_sum {
+                if !(*remainder < *value) {
                     pos = next;
-                    *prefix_sum -= value;
+                    *remainder -= value;
                 }
             }
             mask >>= 1;
@@ -376,30 +379,61 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
 
         pos
     }
-    /// Given a sum, finds the slot in which it would be "contained" within the original
-    /// array, along with the remainder — the portion of the sum that falls strictly past
-    /// the start of the returned slot.
+    /// Binary-searches the conceptual prefix-sum slice
+    /// `[prefix_sum(0), ..., prefix_sum(n)]` (length `n + 1`) for `target`.
     ///
-    /// If the remainder is not needed, destructure with `let (idx, _) = ...`.
+    /// Mirrors [`slice::binary_search`]:
+    /// - `Ok(k)` means `prefix_sum(k) == target`.
+    /// - `Err(k)` means `target` would be inserted at position `k` to keep the slice
+    ///   sorted — i.e. `prefix_sum(k - 1) < target < prefix_sum(k)`, with the edges
+    ///   handled the usual way (`Err(0)` if `target` is below `prefix_sum(0)`,
+    ///   `Err(n + 1)` if above `prefix_sum(n)`).
+    ///
+    /// Equality is decided via the trichotomy of `PartialOrd`, so `T: PartialEq` is
+    /// not required. Incomparable values (e.g. `f64::NAN`) are the caller's
+    /// responsibility.
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let bitree = BITree::from_iter(lengths);
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// // prefix sums: 0, 1, 7, 10, 19, 21
     ///
-    /// let cases: Vec<(usize, (usize, usize))> = vec![(0, (0, 0)), (6, (1, 5)), (9, (2, 2)), (18, (3, 8)), (20, (4, 1))];
+    /// assert_eq!(bitree.binary_search(0), Ok(0));
+    /// assert_eq!(bitree.binary_search(7), Ok(2));
+    /// assert_eq!(bitree.binary_search(21), Ok(5));
     ///
-    /// cases
-    ///   .into_iter()
-    ///   .for_each(|(prefix_sum, idx)| assert_eq!(bitree.index_of(prefix_sum), idx))
+    /// assert_eq!(bitree.binary_search(6), Err(2));
+    /// assert_eq!(bitree.binary_search(9), Err(3));
+    /// assert_eq!(bitree.binary_search(22), Err(6));
     /// ```
-    #[inline(always)]
-    pub fn index_of(&self, mut prefix_sum: T) -> (usize, T) {
-        let index = self.sub_index_of(&mut prefix_sum);
-        (index, prefix_sum)
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let empty = BITree::<f64>::new();
+    ///
+    /// assert!(empty.is_empty());
+    /// assert_eq!(empty.binary_search(-1.0), Err(0));
+    /// assert_eq!(empty.binary_search(0.0), Ok(0));
+    /// assert_eq!(empty.binary_search(1.0), Err(1));
+    /// ```
+    #[inline]
+    pub fn binary_search(&self, mut target: T) -> Result<usize, usize>
+    where
+        T: Default,
+    {
+        let pos = self.sub_binary_search(&mut target);
+        let zero = T::default();
+        if target < zero {
+            Err(pos)
+        } else if zero < target {
+            Err(pos + 1)
+        } else {
+            Ok(pos)
+        }
     }
 }
 
@@ -455,105 +489,118 @@ mod tests {
     }
 
     #[test]
-    fn test_index_of() {
+    fn test_binary_search() {
         let lengths = [1, 6, 3, 9, 2];
         let bitree = BITree::from_iter(lengths);
+        // prefix sums: 0, 1, 7, 10, 19, 21
 
-        let cases: Vec<(usize, (usize, usize))> = vec![
-            (0, (0, 0)),
-            (6, (1, 5)),
-            (9, (2, 2)),
-            (18, (3, 8)),
-            (20, (4, 1)),
+        let cases: Vec<(usize, Result<usize, usize>)> = vec![
+            (0, Ok(0)),
+            (1, Ok(1)),
+            (7, Ok(2)),
+            (10, Ok(3)),
+            (19, Ok(4)),
+            (21, Ok(5)),
+            (6, Err(2)),
+            (9, Err(3)),
+            (18, Err(4)),
+            (20, Err(5)),
+            (22, Err(6)),
         ];
 
         cases
             .into_iter()
-            .for_each(|(prefix_sum, expected)| assert_eq!(bitree.index_of(prefix_sum), expected))
+            .for_each(|(target, expected)| assert_eq!(bitree.binary_search(target), expected))
     }
 
     #[test]
     #[ntest::timeout(1000)]
     fn test_zero_array() {
-        // test for a regression where index_of in an array containing only 0 would loop endlessly
+        // regression: a tree containing only 0 used to loop endlessly
         let f0: BITree<usize> = BITree::from_iter([0]);
         assert_eq!(f0.prefix_sum(0), 0);
-        assert_eq!(f0.index_of(1), (1, 1));
+        // prefix sums: [0, 0]; searching for 1 falls past the end.
+        assert_eq!(f0.binary_search(1), Err(2));
+        let mut remaining = 1usize;
+        assert_eq!(f0.sub_binary_search(&mut remaining), 1);
+        assert_eq!(remaining, 1);
     }
 
     #[test]
-    fn test_sub_index_of_empty() {
+    fn test_sub_binary_search_empty() {
         let bitree: BITree<usize> = BITree::new();
         let mut remaining = 5;
-        assert_eq!(bitree.sub_index_of(&mut remaining), 0);
+        assert_eq!(bitree.sub_binary_search(&mut remaining), 0);
         assert_eq!(remaining, 5);
+        assert_eq!(bitree.binary_search(0usize), Ok(0));
+        assert_eq!(bitree.binary_search(5usize), Err(1));
     }
 
     #[test]
-    fn test_sub_index_of_single() {
+    fn test_sub_binary_search_single() {
         let bitree = BITree::from_iter([7usize]);
         // prefix sums: 0, 7
         let cases: Vec<(usize, (usize, usize))> =
-            vec![(0, (0, 0)), (1, (0, 1)), (7, (0, 7)), (8, (1, 1))];
+            vec![(0, (0, 0)), (1, (0, 1)), (7, (1, 0)), (8, (1, 1))];
         cases.into_iter().for_each(|(target, expected)| {
             let mut remaining = target;
-            let idx = bitree.sub_index_of(&mut remaining);
+            let idx = bitree.sub_binary_search(&mut remaining);
             assert_eq!((idx, remaining), expected, "target={}", target);
         });
     }
 
     #[test]
-    fn test_sub_index_of_power_of_two_len() {
+    fn test_sub_binary_search_power_of_two_len() {
         // length 4 exercises a tree whose root mask equals n
         let bitree = BITree::from_iter([2usize, 3, 5, 7]);
         // prefix sums: 0, 2, 5, 10, 17
         let cases: Vec<(usize, (usize, usize))> = vec![
             (0, (0, 0)),
-            (2, (0, 2)), // boundary: prefix_sum(1)=2 not strictly < 2
+            (2, (1, 0)), // boundary
             (3, (1, 1)),
-            (5, (1, 3)), // boundary
+            (5, (2, 0)), // boundary
             (6, (2, 1)),
-            (10, (2, 5)), // boundary
+            (10, (3, 0)), // boundary
             (11, (3, 1)),
-            (17, (3, 7)), // boundary: total sum
+            (17, (4, 0)), // boundary: total sum
             (18, (4, 1)), // exceeds total
         ];
         cases.into_iter().for_each(|(target, expected)| {
             let mut remaining = target;
-            let idx = bitree.sub_index_of(&mut remaining);
+            let idx = bitree.sub_binary_search(&mut remaining);
             assert_eq!((idx, remaining), expected, "target={}", target);
         });
     }
 
     #[test]
-    fn test_sub_index_of_uniform_seven() {
+    fn test_sub_binary_search_uniform_seven() {
         // length 7 (odd, non-power-of-two) with uniform values makes expected
         // results easy to reason about: prefix_sum(k) = k.
         let bitree = BITree::from_iter([1usize; 7]);
         let cases: Vec<(usize, (usize, usize))> = vec![
             (0, (0, 0)),
-            (1, (0, 1)),
-            (2, (1, 1)),
-            (3, (2, 1)),
-            (4, (3, 1)),
-            (5, (4, 1)),
-            (6, (5, 1)),
-            (7, (6, 1)),
+            (1, (1, 0)),
+            (2, (2, 0)),
+            (3, (3, 0)),
+            (4, (4, 0)),
+            (5, (5, 0)),
+            (6, (6, 0)),
+            (7, (7, 0)),
             (8, (7, 1)), // exceeds total
         ];
         cases.into_iter().for_each(|(target, expected)| {
             let mut remaining = target;
-            let idx = bitree.sub_index_of(&mut remaining);
+            let idx = bitree.sub_binary_search(&mut remaining);
             assert_eq!((idx, remaining), expected, "target={}", target);
         });
     }
 
     #[test]
-    fn test_sub_index_of_exceeds_total() {
+    fn test_sub_binary_search_exceeds_total() {
         let bitree = BITree::from_iter([1usize, 6, 3, 9, 2]);
         // total sum = 21, n = 5
         let mut remaining = 100;
-        assert_eq!(bitree.sub_index_of(&mut remaining), 5);
+        assert_eq!(bitree.sub_binary_search(&mut remaining), 5);
         assert_eq!(remaining, 100 - 21);
     }
 

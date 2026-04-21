@@ -37,7 +37,7 @@ and updates, with no memory overhead versus the original array. See [Fenwick tre
 | Accumulate prefix sum into an existing value | `add_prefix_sum` / `sub_prefix_sum` | `O(log n)` |
 | Point update | `add_at(i, v)` / `sub_at(i, v)` | `O(log n)` |
 | Append / truncate | `push(v)` / `pop()` | amortised `O(log n)` |
-| Invert a prefix sum | `index_of(s)` / `sub_index_of` | `O(log n)` |
+| Invert a prefix sum | `binary_search(s)` / `sub_binary_search` | `O(log n)` |
 | Consume into an iterator over the original values | `into_iter()` (+ `.rev()`) | `O(n)` total |
 
 ## Efficient iteration
@@ -81,10 +81,16 @@ assert_eq!(bitree.prefix_sum(6), 30);
 bitree.pop();
 assert_eq!(bitree.prefix_sum(5), 26);
 
-// Inverse lookup: which slot contains the cumulative total 9?
-// Returns (index, remainder past the start of that slot).
+// Inverse lookup: binary-search the prefix sums [0, 1, 7, 10, 19, 21].
+// `Ok(k)` means target == prefix_sum(k); `Err(k)` is the insertion point.
 let bitree = BITree::from_iter([1usize, 6, 3, 9, 2]);
-assert_eq!(bitree.index_of(9), (2, 2)); // 1 + 6 = 7, then 2 more into slot 2.
+assert_eq!(bitree.binary_search(7), Ok(2));  // exact boundary
+assert_eq!(bitree.binary_search(9), Err(3)); // falls inside slot 2
+
+// Or drive the walk in-place to inspect the remainder yourself.
+let mut remaining = 9usize;
+let pos = bitree.sub_binary_search(&mut remaining);
+assert_eq!((pos, remaining), (2, 2)); // 1 + 6 = 7, then 2 more into slot 2.
 
 // Walk the original values back out, cheaply, in either direction.
 let forward: Vec<_> = bitree.clone().into_iter().collect();
