@@ -102,6 +102,47 @@ impl<T> BITree<T> {
     }
 }
 
+impl<T: for<'a> AddAssign<&'a T>> From<Vec<T>> for BITree<T> {
+    /// Builds a binary indexed tree from a `Vec` of original values, reusing its
+    /// allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let lengths = vec![1, 6, 3, 9, 2];
+    /// let bitree = BITree::from(lengths);
+    /// assert_eq!(bitree.prefix_sum(4), 19);
+    /// ```
+    #[inline]
+    fn from(mut inner: Vec<T>) -> Self {
+        let n = inner.len();
+        rebuild(&mut inner, 0..n, |p, c| *p += c);
+        BITree { inner }
+    }
+}
+
+impl<T: for<'a> SubAssign<&'a T>> From<BITree<T>> for Vec<T> {
+    /// Recovers the original `Vec` of values from a binary indexed tree, reusing its
+    /// allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from(vec![1, 6, 3, 9, 2]);
+    /// assert_eq!(Vec::from(bitree), vec![1, 6, 3, 9, 2]);
+    /// ```
+    #[inline]
+    fn from(mut bitree: BITree<T>) -> Self {
+        let n = bitree.inner.len();
+        rebuild(&mut bitree.inner, (0..n).rev(), |p, c| *p -= c);
+        bitree.inner
+    }
+}
+
 impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
     /// Creates a new binary indexed tree.
     ///
@@ -118,10 +159,7 @@ impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
     /// ```
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut inner: Vec<T> = iter.into_iter().collect();
-        let n = inner.len();
-        rebuild(&mut inner, 0..n, |p, c| *p += c);
-        BITree { inner }
+        Self::from(iter.into_iter().collect::<Vec<_>>())
     }
 }
 
@@ -157,10 +195,8 @@ impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
     /// assert_eq!(reversed, vec![2, 9, 3, 6, 1]);
     /// ```
     #[inline]
-    fn into_iter(mut self) -> Self::IntoIter {
-        let n = self.inner.len();
-        rebuild(&mut self.inner, (0..n).rev(), |p, c| *p -= c);
-        self.inner.into_iter()
+    fn into_iter(self) -> Self::IntoIter {
+        Vec::from(self).into_iter()
     }
 }
 
