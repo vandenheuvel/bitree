@@ -1,3 +1,45 @@
+//! A binary indexed tree (Fenwick tree) for efficient prefix sums.
+//!
+//! A [`BITree<T>`] maintains prefix sums over a mutable sequence of values.
+//! Both point updates and prefix queries run in *O*(log *n*) time, and the
+//! whole structure lives in a single [`Vec<T>`] the same length as the
+//! logical array.
+//!
+//! This crate is `no_std`-compatible; it depends only on [`alloc`]. Values are
+//! generic over any `T` implementing `AddAssign<&T>` — and, where a method
+//! requires subtraction, `SubAssign<&T>`. `T: Copy` is not required, so
+//! arbitrary-precision integers and similar types are supported.
+//!
+//! # Examples
+//!
+//! ```
+//! use bitree::BITree;
+//!
+//! let mut bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+//!
+//! // Prefix sums in O(log n); `prefix_sum(i)` covers `[0..i)`.
+//! assert_eq!(bitree.prefix_sum(3), 10);
+//! assert_eq!(bitree.prefix_sum(5), 21);
+//!
+//! // Point update.
+//! bitree.add_at(1, 5);
+//! assert_eq!(bitree.prefix_sum(3), 15);
+//!
+//! // Grow and shrink like a `Vec`.
+//! bitree.push(4);
+//! bitree.pop();
+//!
+//! // Recover the original values.
+//! assert_eq!(Vec::from(bitree), vec![1, 11, 3, 9, 2]);
+//! ```
+//!
+//! # Crate features
+//!
+//! - **`serde`** — derive [`Serialize`] and [`Deserialize`] for [`BITree<T>`].
+//!
+//! [`Serialize`]: https://docs.rs/serde/latest/serde/trait.Serialize.html
+//! [`Deserialize`]: https://docs.rs/serde/latest/serde/trait.Deserialize.html
+
 #![no_std]
 
 extern crate alloc;
@@ -8,6 +50,14 @@ use core::ops::{AddAssign, SubAssign};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// A binary indexed tree (Fenwick tree) over a sequence of `T` values.
+///
+/// Conceptually, a `BITree<T>` represents an array `a[0..n]` while internally
+/// storing partial sums that allow both prefix-sum queries and point updates
+/// in *O*(log *n*). The internal buffer has the same length as the logical
+/// array, so no memory is wasted relative to a plain [`Vec<T>`].
+///
+/// See the [crate-level documentation](crate) for an overview and examples.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct BITree<T> {
@@ -15,14 +65,37 @@ pub struct BITree<T> {
 }
 
 impl<T> BITree<T> {
-    /// Creates an empty binary indexed tree.
+    /// Constructs a new, empty `BITree<T>`.
+    ///
+    /// The tree will not allocate until values are pushed into it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree: BITree<i32> = BITree::new();
+    /// assert!(bitree.is_empty());
+    /// ```
+    #[inline]
     pub const fn new() -> Self {
         Self { inner: Vec::new() }
     }
 
-    /// Creates a new binary indexed tree containing `n` zero values.
+    /// Constructs a new `BITree<T>` of length `n`, filled with `T::default()`.
     ///
-    /// The initial capacity is `n`.
+    /// The initial capacity is exactly `n`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::<usize>::new_zeros(5);
+    /// assert_eq!(bitree.len(), 5);
+    /// assert_eq!(bitree.prefix_sum(5), 0);
+    /// ```
+    #[inline]
     pub fn new_zeros(n: usize) -> Self
     where
         T: Default,
@@ -36,6 +109,25 @@ impl<T> BITree<T> {
     }
 
     /// Constructs a new, empty `BITree<T>` with at least the specified capacity.
+    ///
+    /// The tree will be able to hold at least `capacity` elements without
+    /// reallocating. This method is allowed to allocate for more elements
+    /// than `capacity`. If `capacity` is zero, the tree will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let mut bitree: BITree<i32> = BITree::with_capacity(10);
+    /// assert!(bitree.is_empty());
+    ///
+    /// for i in 0..10 {
+    ///     bitree.push(i);
+    /// }
+    /// assert_eq!(bitree.len(), 10);
+    /// ```
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: Vec::with_capacity(capacity),
@@ -43,36 +135,57 @@ impl<T> BITree<T> {
     }
 
     /// Returns `true` if the tree contains no elements.
-    pub const fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    pub const fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Removes the last element from the Fenwick tree.
-    ///
-    /// Returns `false` if the tree is empty, and true otherwise.
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let mut bitree = BITree::from_iter([1, 6, 3, 9].into_iter());
+    /// let mut bitree = BITree::new();
+    /// assert!(bitree.is_empty());
+    ///
+    /// bitree.push(1);
+    /// assert!(!bitree.is_empty());
+    /// ```
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns the number of elements in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from_iter([1, 2, 3]);
+    /// assert_eq!(bitree.len(), 3);
+    /// ```
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Removes the last element from the tree, returning `true` if one was
+    /// removed and `false` if the tree was already empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let mut bitree = BITree::from_iter([1, 6, 3, 9]);
     ///
     /// assert_eq!(bitree.pop(), true);
-    /// assert_eq!(bitree.prefix_sum(3), 10);  // sum of remaining [1, 6, 3]
+    /// assert_eq!(bitree.prefix_sum(3), 10); // sum of remaining [1, 6, 3]
     ///
-    /// // Can continue popping
     /// assert_eq!(bitree.pop(), true);
-    /// assert_eq!(bitree.prefix_sum(2), 7);   // sum of remaining [1, 6]
+    /// assert_eq!(bitree.prefix_sum(2), 7);  // sum of remaining [1, 6]
     ///
-    /// // Returns false when empty
-    /// bitree.pop();  // removes 6
-    /// bitree.pop();  // removes 1
-    /// assert_eq!(bitree.pop(), false);
+    /// bitree.pop();
+    /// bitree.pop();
+    /// assert_eq!(bitree.pop(), false);      // already empty
     /// ```
     #[inline(always)]
     pub fn pop(&mut self) -> bool {
@@ -102,17 +215,26 @@ impl<T> BITree<T> {
     }
 }
 
+impl<T> Default for BITree<T> {
+    /// Creates an empty `BITree<T>`.
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: for<'a> AddAssign<&'a T>> From<Vec<T>> for BITree<T> {
-    /// Builds a binary indexed tree from a `Vec` of original values, reusing its
-    /// allocation.
+    /// Builds a `BITree<T>` from a [`Vec`] of values, reusing its allocation.
+    ///
+    /// Runs in *O*(*n*).
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let lengths = vec![1, 6, 3, 9, 2];
-    /// let bitree = BITree::from(lengths);
+    /// let values = vec![1, 6, 3, 9, 2];
+    /// let bitree = BITree::from(values);
     /// assert_eq!(bitree.prefix_sum(4), 19);
     /// ```
     #[inline]
@@ -124,8 +246,9 @@ impl<T: for<'a> AddAssign<&'a T>> From<Vec<T>> for BITree<T> {
 }
 
 impl<T: for<'a> SubAssign<&'a T>> From<BITree<T>> for Vec<T> {
-    /// Recovers the original `Vec` of values from a binary indexed tree, reusing its
-    /// allocation.
+    /// Recovers the original values as a [`Vec`], reusing the tree's allocation.
+    ///
+    /// Runs in *O*(*n*).
     ///
     /// # Examples
     ///
@@ -144,18 +267,17 @@ impl<T: for<'a> SubAssign<&'a T>> From<BITree<T>> for Vec<T> {
 }
 
 impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
-    /// Creates a new binary indexed tree.
+    /// Builds a `BITree<T>` from the values yielded by an iterator.
+    ///
+    /// Runs in *O*(*n*).
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let lengths: [usize; 5] = [1, 6, 3, 9, 2];
-    /// // This is how lengths binary indexed tree will look like internally
-    /// let _internal: Vec<usize> = vec![1, 7, 3, 19, 2];
-    /// // And this is how it can be constructed
-    /// let bitree = BITree::from_iter(lengths);
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// assert_eq!(bitree.prefix_sum(5), 21);
     /// ```
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
@@ -169,18 +291,17 @@ impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
 
     /// Consumes the tree and yields the original values in order.
     ///
-    /// The returned iterator is `DoubleEndedIterator + ExactSizeIterator`, so it
-    /// supports both forward and reverse traversal in O(1) per element after an
-    /// O(n) setup that undoes the Fenwick build.
+    /// The returned iterator implements both [`DoubleEndedIterator`] and
+    /// [`ExactSizeIterator`], so forward and reverse traversal both run in
+    /// *O*(1) per element after an *O*(*n*) setup that inverts the Fenwick
+    /// build.
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let bitree = BITree::from_iter(lengths);
-    ///
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
     /// let collected: Vec<_> = bitree.into_iter().collect();
     /// assert_eq!(collected, vec![1, 6, 3, 9, 2]);
     /// ```
@@ -225,12 +346,13 @@ where
 }
 
 impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
-    /// Adds the prefix sum up until the desired index into `sum`.
+    /// Adds the prefix sum of `[0..index)` into `sum`.
     ///
-    /// The prefix sum up until the zeroth element is 0, so `sum` is left unchanged.
+    /// When `index` is `0`, `sum` is left unchanged.
     ///
-    /// The prefix sum up until an index larger than the length is undefined, since every
-    /// element after the length - 1 is undefined, therefore it will panic.
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
     ///
     /// # Examples
     ///
@@ -247,41 +369,14 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
     pub fn add_prefix_sum(&self, index: usize, sum: &mut T) {
         self.walk_prefix(index, sum, |s, v| *s += v);
     }
-    /// Computes the prefix sum up until (excluding) the desired index, starting from
-    /// `T::default()`.
+
+    /// Subtracts the prefix sum of `[0..index)` from `sum`.
     ///
-    /// See [`Self::add_prefix_sum`] for the variant that accumulates into an existing value.
+    /// When `index` is `0`, `sum` is left unchanged.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let bitree = BITree::from_iter(lengths);
-    ///
-    /// let cases: Vec<(usize, usize)> =
-    ///  vec![(0, 0), (1, 1), (2, 7), (3, 10), (4, 19), (5, 21)];
-    ///
-    /// cases
-    ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
-    /// ```
-    #[inline]
-    pub fn prefix_sum(&self, index: usize) -> T
-    where
-        T: Default,
-    {
-        let mut sum = T::default();
-        self.add_prefix_sum(index, &mut sum);
-        sum
-    }
-    /// Subtracts the prefix sum up until the desired index from `sum`.
-    ///
-    /// The prefix sum up until the zeroth element is 0, so `sum` is left unchanged.
-    ///
-    /// The prefix sum up until an index larger than the length is undefined, since every
-    /// element after the length - 1 is undefined, therefore it will panic.
+    /// Panics if `index > self.len()`.
     ///
     /// # Examples
     ///
@@ -298,43 +393,102 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
     pub fn sub_prefix_sum(&self, index: usize, sum: &mut T) {
         self.walk_prefix(index, sum, |s, v| *s -= v);
     }
-    /// Increments a given index with a difference.
+
+    /// Returns the prefix sum of `[0..index)`.
+    ///
+    /// Equivalent to starting from `T::default()` and calling
+    /// [`add_prefix_sum`](Self::add_prefix_sum). The prefix sum at `index = 0`
+    /// is `T::default()`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut bitree = BITree::from_iter(lengths);
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
     ///
-    /// let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 2), (2, 8), (3, 11), (4, 20), (5, 22)];
+    /// assert_eq!(bitree.prefix_sum(0), 0);
+    /// assert_eq!(bitree.prefix_sum(1), 1);
+    /// assert_eq!(bitree.prefix_sum(3), 10);
+    /// assert_eq!(bitree.prefix_sum(5), 21);
+    /// ```
+    #[inline]
+    pub fn prefix_sum(&self, index: usize) -> T
+    where
+        T: Default,
+    {
+        let mut sum = T::default();
+        self.add_prefix_sum(index, &mut sum);
+        sum
+    }
+
+    /// Adds `diff` to the value at `index`.
     ///
-    /// bitree.add_at(0, 1);
+    /// # Panics
     ///
-    /// cases
-    ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
+    /// Panics if `index >= self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let mut bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// // logical array: [1, 6, 3, 9, 2]
+    ///
+    /// bitree.add_at(1, 5);
+    /// // logical array: [1, 11, 3, 9, 2]
+    ///
+    /// assert_eq!(bitree.prefix_sum(3), 15);
     /// ```
     #[inline]
     pub fn add_at(&mut self, index: usize, diff: T) {
         self.walk_update(index, diff, |v, d| *v += d);
     }
-    /// Appends a new value to the end of the Fenwick tree.
+
+    /// Subtracts `diff` from the value at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
     ///
     /// # Examples
     ///
     /// ```
     /// use bitree::BITree;
     ///
-    /// let mut bitree = BITree::from_iter([1, 6, 3].into_iter());
-    /// bitree.push(9);
+    /// let mut bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// // logical array: [1, 6, 3, 9, 2]
     ///
-    /// // Check prefix sums after pushing
-    /// assert_eq!(bitree.prefix_sum(1), 1);  // sum of [1]
-    /// assert_eq!(bitree.prefix_sum(2), 7);  // sum of [1, 6]
-    /// assert_eq!(bitree.prefix_sum(3), 10); // sum of [1, 6, 3]
-    /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
+    /// bitree.sub_at(3, 4);
+    /// // logical array: [1, 6, 3, 5, 2]
+    ///
+    /// assert_eq!(bitree.prefix_sum(5), 17);
+    /// ```
+    #[inline]
+    pub fn sub_at(&mut self, index: usize, diff: T) {
+        self.walk_update(index, diff, |v, d| *v -= d);
+    }
+
+    /// Appends a value to the end of the tree.
+    ///
+    /// Runs in amortised *O*(log *n*).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let mut bitree = BITree::from_iter([1, 6, 3]);
+    /// bitree.push(9);
+    /// bitree.push(2);
+    ///
+    /// assert_eq!(bitree.prefix_sum(4), 19);
+    /// assert_eq!(bitree.prefix_sum(5), 21);
     /// ```
     #[inline]
     pub fn push(&mut self, mut value: T) {
@@ -345,38 +499,26 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
         }
         self.inner.push(value);
     }
-    /// Subtracts a difference from a given index.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let mut bitree = BITree::from_iter(lengths);
-    ///
-    /// let cases: Vec<(usize, usize)> = vec![(0, 0), (1, 0), (2, 6), (3, 9), (4, 18), (5, 20)];
-    ///
-    /// bitree.sub_at(0, 1);
-    ///
-    /// cases
-    ///   .into_iter()
-    ///   .for_each(|(idx, expected_sum)| assert_eq!(bitree.prefix_sum(idx), expected_sum))
-    /// ```
-    #[inline]
-    pub fn sub_at(&mut self, index: usize, diff: T) {
-        self.walk_update(index, diff, |v, d| *v -= d);
-    }
 }
 
 impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree<T> {
-    /// Walks the tree to find the largest `pos` such that `prefix_sum(pos) <= target`,
-    /// subtracting the consumed segment sums from `*remainder` along the way.
+    /// Walks the tree to find the largest `pos` such that
+    /// `prefix_sum(pos) <= target`, subtracting the consumed segment sums
+    /// from `*remainder` along the way.
     ///
-    /// The caller supplies the initial target in `*remainder`. After the call,
-    /// `*remainder` holds `target - prefix_sum(pos)`. A `remainder` of `T::default()`
-    /// means `target` landed exactly on the boundary `prefix_sum(pos)`; anything else
-    /// falls strictly inside the slot starting at `pos`.
+    /// The caller supplies the initial `target` in `*remainder`. After the
+    /// call, `*remainder` holds `target - prefix_sum(pos)`. A remainder of
+    /// `T::default()` means `target` landed exactly on the boundary
+    /// `prefix_sum(pos)`; any positive remainder falls strictly inside the
+    /// slot that starts at `pos`.
+    ///
+    /// This is the lower-level primitive behind
+    /// [`binary_search`](Self::binary_search); use that method when you only
+    /// need the slot index and don't care about the remainder.
+    ///
+    /// Equality is decided via the trichotomy of [`PartialOrd`], so
+    /// [`PartialEq`] is not required. Values that are incomparable with
+    /// `target` (for example `f64::NAN`) are the caller's responsibility.
     ///
     /// # Examples
     ///
@@ -415,21 +557,25 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
 
         pos
     }
+
     /// Binary-searches the conceptual prefix-sum slice
-    /// `[prefix_sum(0), ..., prefix_sum(n)]` (length `n + 1`) for `target`.
+    /// `[prefix_sum(0), prefix_sum(1), ..., prefix_sum(n)]` for `target`.
     ///
-    /// Mirrors [`slice::binary_search`]:
-    /// - `Ok(k)` means `prefix_sum(k) == target`.
-    /// - `Err(k)` means `target` would be inserted at position `k` to keep the slice
-    ///   sorted — i.e. `prefix_sum(k - 1) < target < prefix_sum(k)`, with the edges
-    ///   handled the usual way (`Err(0)` if `target` is below `prefix_sum(0)`,
-    ///   `Err(n + 1)` if above `prefix_sum(n)`).
+    /// The behaviour mirrors [`slice::binary_search`]:
     ///
-    /// Equality is decided via the trichotomy of `PartialOrd`, so `T: PartialEq` is
-    /// not required. Incomparable values (e.g. `f64::NAN`) are the caller's
-    /// responsibility.
+    /// - `Ok(k)` if `prefix_sum(k) == target`.
+    /// - `Err(k)` if `target` would be inserted at position `k` to keep the
+    ///   slice sorted — that is, `prefix_sum(k - 1) < target < prefix_sum(k)`,
+    ///   with `Err(0)` when `target` is below `prefix_sum(0)` and
+    ///   `Err(n + 1)` when `target` is above `prefix_sum(n)`.
+    ///
+    /// Equality is decided via the trichotomy of [`PartialOrd`], so
+    /// [`PartialEq`] is not required. Values that are incomparable with
+    /// `target` (for example `f64::NAN`) are the caller's responsibility.
     ///
     /// # Examples
+    ///
+    /// Looking up sums in an integer tree:
     ///
     /// ```
     /// use bitree::BITree;
@@ -445,6 +591,8 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
     /// assert_eq!(bitree.binary_search(9), Err(3));
     /// assert_eq!(bitree.binary_search(22), Err(6));
     /// ```
+    ///
+    /// An empty tree still has the single prefix sum `prefix_sum(0) = 0`:
     ///
     /// ```
     /// use bitree::BITree;

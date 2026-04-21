@@ -14,7 +14,7 @@ fits in a single `Vec<T>` the same length as the input array.
   strictly more general cousin (arbitrary monoids, range updates), at the
   cost of `~2×` memory and a heavier implementation.
 
-A Fenwick tree sits somwhere in between: `O(log n)` for both queries
+A Fenwick tree sits somewhere in between: `O(log n)` for both queries
 and updates, with no memory overhead versus the original array. See [Fenwick tree on Wikipedia](https://en.wikipedia.org/wiki/Fenwick_tree).
 
 ## Features
