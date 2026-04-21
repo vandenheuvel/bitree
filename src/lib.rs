@@ -14,68 +14,6 @@ pub struct BITree<T> {
     inner: Vec<T>,
 }
 
-impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
-    /// Creates a new binary indexed tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let lengths: [usize; 5] = [1, 6, 3, 9, 2];
-    /// // This is how lengths binary indexed tree will look like internally
-    /// let _internal: Vec<usize> = vec![1, 7, 3, 19, 2];
-    /// // And this is how it can be constructed
-    /// let bitree = BITree::from_iter(lengths);
-    /// ```
-    #[inline]
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut inner: Vec<T> = iter.into_iter().collect();
-        let n = inner.len();
-        rebuild(&mut inner, 0..n, |p, c| *p += c);
-        BITree { inner }
-    }
-}
-
-impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
-    type Item = T;
-    type IntoIter = alloc::vec::IntoIter<T>;
-
-    /// Consumes the tree and yields the original values in order.
-    ///
-    /// The returned iterator is `DoubleEndedIterator + ExactSizeIterator`, so it
-    /// supports both forward and reverse traversal in O(1) per element after an
-    /// O(n) setup that undoes the Fenwick build.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let lengths = [1, 6, 3, 9, 2];
-    /// let bitree = BITree::from_iter(lengths);
-    ///
-    /// let collected: Vec<_> = bitree.into_iter().collect();
-    /// assert_eq!(collected, vec![1, 6, 3, 9, 2]);
-    /// ```
-    ///
-    /// Reverse iteration works too:
-    ///
-    /// ```
-    /// use bitree::BITree;
-    ///
-    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
-    /// let reversed: Vec<_> = bitree.into_iter().rev().collect();
-    /// assert_eq!(reversed, vec![2, 9, 3, 6, 1]);
-    /// ```
-    #[inline]
-    fn into_iter(mut self) -> Self::IntoIter {
-        let n = self.inner.len();
-        rebuild(&mut self.inner, (0..n).rev(), |p, c| *p -= c);
-        self.inner.into_iter()
-    }
-}
-
 impl<T> BITree<T> {
     /// Creates an empty binary indexed tree.
     pub const fn new() -> Self {
@@ -158,6 +96,92 @@ impl<T> BITree<T> {
         while let Some(value) = self.inner.get_mut(current_idx) {
             op(value, &diff);
             current_idx |= current_idx + 1;
+        }
+    }
+}
+
+impl<T: for<'a> AddAssign<&'a T>> FromIterator<T> for BITree<T> {
+    /// Creates a new binary indexed tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let lengths: [usize; 5] = [1, 6, 3, 9, 2];
+    /// // This is how lengths binary indexed tree will look like internally
+    /// let _internal: Vec<usize> = vec![1, 7, 3, 19, 2];
+    /// // And this is how it can be constructed
+    /// let bitree = BITree::from_iter(lengths);
+    /// ```
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut inner: Vec<T> = iter.into_iter().collect();
+        let n = inner.len();
+        rebuild(&mut inner, 0..n, |p, c| *p += c);
+        BITree { inner }
+    }
+}
+
+impl<T: for<'a> SubAssign<&'a T>> IntoIterator for BITree<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+
+    /// Consumes the tree and yields the original values in order.
+    ///
+    /// The returned iterator is `DoubleEndedIterator + ExactSizeIterator`, so it
+    /// supports both forward and reverse traversal in O(1) per element after an
+    /// O(n) setup that undoes the Fenwick build.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let lengths = [1, 6, 3, 9, 2];
+    /// let bitree = BITree::from_iter(lengths);
+    ///
+    /// let collected: Vec<_> = bitree.into_iter().collect();
+    /// assert_eq!(collected, vec![1, 6, 3, 9, 2]);
+    /// ```
+    ///
+    /// Reverse iteration works too:
+    ///
+    /// ```
+    /// use bitree::BITree;
+    ///
+    /// let bitree = BITree::from_iter([1, 6, 3, 9, 2]);
+    /// let reversed: Vec<_> = bitree.into_iter().rev().collect();
+    /// assert_eq!(reversed, vec![2, 9, 3, 6, 1]);
+    /// ```
+    #[inline]
+    fn into_iter(mut self) -> Self::IntoIter {
+        let n = self.inner.len();
+        rebuild(&mut self.inner, (0..n).rev(), |p, c| *p -= c);
+        self.inner.into_iter()
+    }
+}
+
+#[inline(always)]
+fn rebuild<T, I, F>(inner: &mut [T], indices: I, mut op: F)
+where
+    I: IntoIterator<Item = usize>,
+    F: FnMut(&mut T, &T),
+{
+    let n = inner.len();
+    let ptr = inner.as_mut_ptr();
+    for i in indices {
+        let parent = i | (i + 1);
+        if parent < n {
+            // SAFETY:
+            //  - i < parent < n, so both offsets are in-bounds of `inner`.
+            //  - parent != i, so the &mut and & never alias.
+            //  - `ptr` is derived from a valid &mut [T] that outlives the loop.
+            unsafe {
+                let child = &*ptr.add(i);
+                let parent_ref = &mut *ptr.add(parent);
+                op(parent_ref, child);
+            }
         }
     }
 }
@@ -275,9 +299,9 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T>> BITree<T> {
     /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
     /// ```
     pub fn push(&mut self, mut value: T) {
-        let index = self.inner.len();
-        for i in 0..index.trailing_ones() {
-            let child = index & !(1 << i);
+        let n = self.inner.len();
+        for i in 0..n.trailing_ones() {
+            let child = n & !(1 << i);
             value += &self.inner[child];
         }
         self.inner.push(value);
@@ -327,13 +351,22 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
     pub fn sub_index_of(&self, prefix_sum: &mut T) -> usize {
         let n = self.inner.len();
         let mut pos = 0;
+
+        #[inline(always)]
+        const fn most_significant_bit(n: usize) -> usize {
+            if n == 0 {
+                0
+            } else {
+                1 << (usize::BITS - 1 - n.leading_zeros())
+            }
+        }
         let mut mask = most_significant_bit(n);
 
         while mask > 0 {
             let next = pos + mask;
             if next <= n {
                 let value = &self.inner[next - 1];
-                if *value < *prefix_sum {
+                if value < prefix_sum {
                     pos = next;
                     *prefix_sum -= value;
                 }
@@ -367,39 +400,6 @@ impl<T: for<'a> AddAssign<&'a T> + for<'a> SubAssign<&'a T> + PartialOrd> BITree
     pub fn index_of(&self, mut prefix_sum: T) -> (usize, T) {
         let index = self.sub_index_of(&mut prefix_sum);
         (index, prefix_sum)
-    }
-}
-
-#[inline(always)]
-fn rebuild<T, I, F>(inner: &mut [T], indices: I, mut op: F)
-where
-    I: IntoIterator<Item = usize>,
-    F: FnMut(&mut T, &T),
-{
-    let n = inner.len();
-    let ptr = inner.as_mut_ptr();
-    for i in indices {
-        let parent = i | (i + 1);
-        if parent < n {
-            // SAFETY:
-            //  - i < parent < n, so both offsets are in-bounds of `inner`.
-            //  - parent != i, so the &mut and & never alias.
-            //  - `ptr` is derived from a valid &mut [T] that outlives the loop.
-            unsafe {
-                let child = &*ptr.add(i);
-                let parent_ref = &mut *ptr.add(parent);
-                op(parent_ref, child);
-            }
-        }
-    }
-}
-
-#[inline(always)]
-const fn most_significant_bit(n: usize) -> usize {
-    if n == 0 {
-        0
-    } else {
-        1 << (usize::BITS - 1 - n.leading_zeros())
     }
 }
 
