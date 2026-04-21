@@ -242,19 +242,16 @@ impl<T> BITree<T> {
     /// assert_eq!(bitree.prefix_sum(3), 10); // sum of [1, 6, 3]
     /// assert_eq!(bitree.prefix_sum(4), 19); // sum of [1, 6, 3, 9]
     /// ```
-    pub fn push(&mut self, value: T)
+    pub fn push(&mut self, mut value: T)
     where
         T: for<'a> AddAssign<&'a T>,
     {
         let index = self.inner.len();
-        self.inner.push(value);
-
-        let lower_one_bits = (!index).trailing_zeros();
-        let (left, right) = self.inner.split_at_mut(index);
-        for i in 0..lower_one_bits {
+        for i in 0..index.trailing_ones() {
             let child = index & !(1 << i);
-            right[0] += &left[child];
+            value += &self.inner[child];
         }
+        self.inner.push(value);
     }
     /// Subtracts a difference from a given index.
     ///
