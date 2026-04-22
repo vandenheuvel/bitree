@@ -9,7 +9,7 @@ license = "GPL-3.0-or-later"
 readme = "README.md"
 keywords = ["fenwick", "binary-indexed-tree", "prefix-sum", "data-structure", "no-std"]
 categories = ["data-structures", "algorithms", "no-std"]
-exclude = ["target/", ".claude/"]
+exclude = ["target/", ".idea/", ".claude/", "examples/benchmark/target/"]
 
 [features]
 default = []

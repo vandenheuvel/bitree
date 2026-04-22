@@ -19,12 +19,12 @@ and updates, with no memory overhead versus the original array. See [Fenwick tre
 
 ## Features
 
+- Highly performant, but only minimal use of `unsafe`.
 - `no_std` compatible (uses `alloc`).
-- Generic over any `T` implementing `AddAssign<&T>` / `SubAssign<&T>` (like `f32/f64`, `usize`, ...).
 - No `Copy` needed, so works for e.g., arbitrary precision types.
 - Dynamic sizing via `push` / `pop`, just like (the underlying) `Vec`.
 - Inverse lookup: given a prefix sum, find the slot that contains it.
-- **Efficient consumption in both directions** — see below.
+- Efficiently restores to the original values in `O(n)`.
 - Optional `serde` support behind the `serde` feature.
 
 ## API at a glance
@@ -92,12 +92,25 @@ let mut remaining = 9usize;
 let pos = bitree.sub_binary_search(&mut remaining);
 assert_eq!((pos, remaining), (2, 2)); // 1 + 6 = 7, then 2 more into slot 2.
 
-// Walk the original values back out, cheaply, in either direction.
-let forward: Vec<_> = bitree.clone().into_iter().collect();
+// Restore the original values, cheaply.
+let values: Vec<_> = bitree.into();
 assert_eq!(forward, vec![1, 6, 3, 9, 2]);
-let reversed: Vec<_> = bitree.into_iter().rev().collect();
-assert_eq!(reversed, vec![2, 9, 3, 6, 1]);
 ```
+
+## Comparison with related crates
+
+Reproduce with `cd examples/benchmark && cargo run --release` (n = 2²⁰
+`u64` elements). `build` and `restore` operations consume their inputs
+and use whatever methods are available in the crate.
+
+| crate                                                        | build (ns/el) | `prefix_sum` (ns) | `add_at` (ns) | restore (ns/el) |
+| ------------------------------------------------------------ |--------------:|------------------:|--------------:|----------------:|
+| [`bitree`](https://crates.io/crates/bitree)                  |       **0.8** |              16.3 |          24.0 |         **0.6** |
+| [`ftree`](https://crates.io/crates/ftree)                    |       **0.8** |              16.1 |          24.3 |             3.9 |
+| [`segment-tree`](https://crates.io/crates/segment-tree)      |           0.9 |              17.1 |          23.9 |             3.9 |
+| [`fenwick`](https://crates.io/crates/fenwick)                |          11.1 |              20.0 |          23.9 |             6.8 |
+
+The differences in `prefix_sum` and `add_at` are within a noise range; `bitree`'s in-place inverse build makes `restore` roughly an order of magnitude faster than reconstructing the values from prefix-sum differences.
 
 ## Acknowledgements
 

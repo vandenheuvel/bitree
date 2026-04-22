@@ -1,3 +1,5 @@
 .idea/
 
 /target
+examples/benchmark/target/
+examples/benchmark/Cargo.lock
