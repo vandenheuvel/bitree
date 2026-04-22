@@ -1,6 +1,6 @@
 [package]
 name = "bitree"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.85"
 description = "A no_std-compatible binary indexed tree (Fenwick tree) for efficient prefix sums."
